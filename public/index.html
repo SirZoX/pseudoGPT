@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Validador de Robots de Trading</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; background: #f4f6f9; color: #1a1a1a; height: 100vh; display: flex; flex-direction: column; }
+    header { background: #1a1a2e; color: #fff; padding: 12px 24px; font-size: 16px; font-weight: 600; letter-spacing: 0.3px; flex-shrink: 0; }
+    .layout { display: flex; flex: 1; overflow: hidden; }
+    .sidebar { width: 300px; min-width: 240px; max-width: 340px; background: #fff; border-right: 1px solid #dde1e8; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+    .tab-bar { display: flex; border-bottom: 1px solid #dde1e8; flex-shrink: 0; }
+    .tab-btn { flex: 1; padding: 11px 6px; font-size: 12px; font-weight: 600; text-align: center; cursor: pointer; border: none; background: #f9fafb; color: #888; letter-spacing: 0.3px; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s, background .15s; }
+    .tab-btn.active { background: #fff; color: #1a1a2e; border-bottom-color: #1a1a2e; }
+    .tab-panel { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+    .tab-panel.active { display: flex; }
+    .progress-wrap { padding: 14px 16px 10px; border-bottom: 1px solid #eee; flex-shrink: 0; }
+    .progress-label { font-size: 11px; color: #888; margin-bottom: 6px; display: flex; justify-content: space-between; }
+    .progress-bar { height: 6px; background: #e8eaf0; border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #1a1a2e; border-radius: 3px; width: 0%; transition: width .4s ease; }
+    .points-scroll { overflow-y: auto; flex: 1; padding: 10px 16px; }
+    .points-list { list-style: none; counter-reset: pt; }
+    .points-list li { counter-increment: pt; display: flex; align-items: flex-start; gap: 9px; padding: 7px 0; border-bottom: 1px solid #f2f2f2; font-size: 12px; line-height: 1.4; color: #444; transition: color .2s; }
+    .points-list li.done { color: #aaa; text-decoration: line-through; }
+    .points-list li::before { content: counter(pt); background: #1a1a2e; color: #fff; font-size: 10px; font-weight: 700; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+    .points-list li.done::before { background: #5cb85c; content: "\2713"; }
+    .btn-restart { display: block; width: calc(100% - 32px); margin: 12px 16px; padding: 9px; background: transparent; color: #1a1a2e; border: 1px solid #1a1a2e; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: background .2s, color .2s; flex-shrink: 0; }
+    .btn-restart:hover { background: #1a1a2e; color: #fff; }
+    .guide-scroll { overflow-y: auto; flex: 1; padding: 14px 16px; }
+    .guide-scroll p.intro { color: #666; margin-bottom: 12px; line-height: 1.5; font-size: 12px; }
+    .guide-list { list-style: none; counter-reset: g; }
+    .guide-list li { counter-increment: g; display: flex; align-items: flex-start; gap: 9px; padding: 7px 0; border-bottom: 1px solid #f2f2f2; font-size: 12px; line-height: 1.4; color: #444; }
+    .guide-list li::before { content: counter(g); background: #e8eaf0; color: #555; font-size: 10px; font-weight: 700; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+    .chat-col { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #f4f6f9; }
+    .chat-history { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+    .message { display: flex; flex-direction: column; max-width: 78%; }
+    .message.user  { align-self: flex-end;  align-items: flex-end; }
+    .message.gpt   { align-self: flex-start; align-items: flex-start; }
+    .message.error { align-self: flex-start; align-items: flex-start; }
+    .message .label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; color: #999; }
+    .message .bubble { padding: 10px 14px; border-radius: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+    .message.user  .bubble { background: #d0e8ff; border-bottom-right-radius: 3px; color: #0a2840; }
+    .message.gpt   .bubble { background: #fff; border: 1px solid #e0e4eb; border-bottom-left-radius: 3px; }
+    .message.error .bubble { background: #fff0f0; border: 1px solid #f5bcbc; color: #b00020; border-bottom-left-radius: 3px; }
+    .typing-indicator { display: flex; align-items: center; gap: 5px; padding: 10px 14px; background: #fff; border: 1px solid #e0e4eb; border-radius: 12px; border-bottom-left-radius: 3px; width: fit-content; }
+    .typing-indicator span { width: 7px; height: 7px; background: #bbb; border-radius: 50%; animation: bounce 1.2s infinite; }
+    .typing-indicator span:nth-child(2) { animation-delay: .2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce { 0%,80%,100%{transform:translateY(0);opacity:.5} 40%{transform:translateY(-5px);opacity:1} }
+    .input-area { border-top: 1px solid #dde1e8; background: #fff; padding: 14px 20px; display: flex; gap: 10px; align-items: flex-end; flex-shrink: 0; }
+    #user-input { flex: 1; resize: none; border: 1px solid #cdd2da; border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: 14px; line-height: 1.5; max-height: 140px; overflow-y: auto; outline: none; transition: border-color .2s; }
+    #user-input:focus { border-color: #1a1a2e; }
+    #user-input:disabled { background: #f8f8f8; color: #aaa; }
+    #send-btn { padding: 10px 18px; background: #1a1a2e; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; transition: background .2s; align-self: flex-end; }
+    #send-btn:hover:not(:disabled) { background: #2d2d4e; }
+    #send-btn:disabled { background: #aaa; cursor: not-allowed; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>&#x1F916; Validador de Robots de Trading</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="progress">Progreso</button>
+      <button class="tab-btn" data-tab="guide">Gu&#237;a</button>
+    </div>
+
+    <div class="tab-panel active" id="tab-progress">
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span>Puntos cubiertos</span>
+          <span id="progress-count">0 / 16</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+      <div class="points-scroll">
+        <ol class="points-list" id="points-list">
+          <li>Exchange</li>
+          <li>Tipo de mercado</li>
+          <li>Timeframes</li>
+          <li>Condiciones de entrada</li>
+          <li>Tipo de entrada</li>
+          <li>Condiciones de salida</li>
+          <li>Gesti&#243;n de posiciones</li>
+          <li>Settings configurables</li>
+          <li>Filtros de riesgo</li>
+          <li>Filtros de mercado</li>
+          <li>Logging y monitorizaci&#243;n</li>
+          <li>Seguridad operativa</li>
+          <li>Licencias</li>
+          <li>Panel web de gesti&#243;n</li>
+          <li>Roles de usuario</li>
+          <li>Actualizaciones del robot</li>
+        </ol>
+      </div>
+      <button class="btn-restart" id="btn-restart">&#8634; Reiniciar sesi&#243;n</button>
+    </div>
+
+    <div class="tab-panel" id="tab-guide">
+      <div class="guide-scroll">
+        <p class="intro">Puntos que debe cubrir una especificaci&#243;n completa. La IA los ir&#225; pidiendo en orden.</p>
+        <ol class="guide-list">
+          <li>Exchange (Binance / BingX / ambos)</li>
+          <li>Tipo de mercado (Spot / Futuros &middot; Long/Short)</li>
+          <li>Timeframes utilizados</li>
+          <li>Condiciones de entrada (indicadores, par&#225;metros, l&#243;gica AND/OR)</li>
+          <li>Tipo de entrada (Market / Limit)</li>
+          <li>Condiciones de salida (TP, SL, trailing, break even&hellip;)</li>
+          <li>Gesti&#243;n de posiciones (DCA, pyramiding, cierre parcial&hellip;)</li>
+          <li>Settings configurables (par&#225;metros, valores por defecto/min/max)</li>
+          <li>Filtros de riesgo (drawdown, p&#233;rdidas diarias, l&#237;mite de ops)</li>
+          <li>Filtros de mercado (volatilidad, volumen, horario&hellip;)</li>
+          <li>Logging y monitorizaci&#243;n (telegram, email, alertas&hellip;)</li>
+          <li>Seguridad operativa (kill switch, watchdog, duplicados&hellip;)</li>
+          <li>Licencias (personal / comercial, validaci&#243;n, duraci&#243;n)</li>
+          <li>Panel web de gesti&#243;n (login, dashboard, secciones)</li>
+          <li>Roles de usuario (admin, usuario, permisos)</li>
+          <li>Actualizaciones del robot (versiones, notificaciones, auto-update)</li>
+        </ol>
+      </div>
+    </div>
+  </aside>
+
+  <div class="chat-col">
+    <div class="chat-history" id="chat-history"></div>
+    <div class="input-area">
+      <textarea id="user-input" rows="3" placeholder="Escribe tu respuesta&#8230; (Enter para enviar, Shift+Enter para nueva l&#237;nea)" disabled></textarea>
+      <button id="send-btn" disabled>Enviar</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let conversationHistory = [];
+  let pointsDone = 0;
+  const TOTAL_POINTS = 16;
+
+  const historyEl     = document.getElementById('chat-history');
+  const textarea      = document.getElementById('user-input');
+  const sendBtn       = document.getElementById('send-btn');
+  const restartBtn    = document.getElementById('btn-restart');
+  const progressFill  = document.getElementById('progress-fill');
+  const progressCount = document.getElementById('progress-count');
+  const pointsListEl  = document.getElementById('points-list');
+
+  document.addEventListener('DOMContentLoaded', startSession);
+
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  restartBtn.addEventListener('click', () => {
+    if (confirm('Reiniciar la sesion? Se perdera el progreso actual.')) {
+      historyEl.innerHTML = '';
+      conversationHistory = [];
+      pointsDone = 0;
+      updateProgress(0);
+      startSession();
+    }
+  });
+
+  textarea.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+
+  textarea.addEventListener('input', () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 140) + 'px';
+  });
+
+  sendBtn.addEventListener('click', sendMessage);
+
+  async function startSession() {
+    setInputEnabled(false);
+    addTypingIndicator();
+    conversationHistory = [{ role: 'user', content: 'inicio' }];
+    try {
+      const reply = await callAPI(conversationHistory);
+      conversationHistory.push({ role: 'assistant', content: reply });
+      removeTypingIndicator();
+      addMessage('gpt', reply);
+      detectProgress(reply);
+    } catch (err) {
+      removeTypingIndicator();
+      addMessage('error', 'No se pudo conectar con el servidor.');
+    }
+    setInputEnabled(true);
+  }
+
+  async function sendMessage() {
+    const text = textarea.value.trim();
+    if (!text) return;
+    textarea.value = '';
+    textarea.style.height = 'auto';
+    setInputEnabled(false);
+    conversationHistory.push({ role: 'user', content: text });
+    addMessage('user', text);
+    addTypingIndicator();
+    try {
+      const reply = await callAPI(conversationHistory);
+      conversationHistory.push({ role: 'assistant', content: reply });
+      removeTypingIndicator();
+      addMessage('gpt', reply);
+      detectProgress(reply);
+    } catch (err) {
+      removeTypingIndicator();
+      addMessage('error', 'Error: ' + err.message);
+    }
+    setInputEnabled(true);
+  }
+
+  async function callAPI(messages) {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor');
+    return data.reply;
+  }
+
+  function detectProgress(replyText) {
+    const n = conversationHistory.filter(m => m.role === 'assistant').length;
+    const estimated = Math.min(Math.max(n - 1, 0), TOTAL_POINTS);
+    updateProgress(estimated);
+    if (replyText.includes('CHECKLIST DE ESPECIFICACION') || replyText.includes('ESPECIFICACION TECNICA COMPLETA')) {
+      updateProgress(TOTAL_POINTS);
+    }
+  }
+
+  function updateProgress(n) {
+    pointsDone = n;
+    progressFill.style.width = Math.round(n / TOTAL_POINTS * 100) + '%';
+    progressCount.textContent = n + ' / ' + TOTAL_POINTS;
+    pointsListEl.querySelectorAll('li').forEach((li, i) => li.classList.toggle('done', i < n));
+  }
+
+  function addMessage(role, text) {
+    const wrap = document.createElement('div');
+    wrap.className = 'message ' + role;
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = role === 'user' ? 'Tu' : role === 'gpt' ? 'GPT' : 'Error';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    historyEl.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  function addTypingIndicator() {
+    const wrap = document.createElement('div');
+    wrap.className = 'message gpt';
+    wrap.id = 'typing';
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = 'GPT';
+    const ind = document.createElement('div');
+    ind.className = 'typing-indicator';
+    ind.innerHTML = '<span></span><span></span><span></span>';
+    wrap.appendChild(label);
+    wrap.appendChild(ind);
+    historyEl.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  function removeTypingIndicator() {
+    const el = document.getElementById('typing');
+    if (el) el.remove();
+  }
+
+  function setInputEnabled(enabled) {
+    textarea.disabled = !enabled;
+    sendBtn.disabled  = !enabled;
+    if (enabled) textarea.focus();
+  }
+
+  function scrollToBottom() {
+    historyEl.scrollTop = historyEl.scrollHeight;
+  }
+</script>
+
+</body>
+</html>

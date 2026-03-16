@@ -1,0 +1,15 @@
+# Credenciales — nunca al repositorio
+crdntls/.env
+.env
+*.env
+
+# Dependencias
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
