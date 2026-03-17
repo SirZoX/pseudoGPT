@@ -236,9 +236,13 @@
   }
 
   function detectProgress(replyText) {
-    const n = conversationHistory.filter(m => m.role === 'assistant').length;
-    const estimated = Math.min(Math.max(n - 1, 0), TOTAL_POINTS);
-    updateProgress(estimated);
+    // Detectar [PUNTO_OK:N] emitido explicitamente por la IA
+    const match = replyText.match(/\[PUNTO_OK:(\d+)\]/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n >= 1 && n <= TOTAL_POINTS) updateProgress(n);
+    }
+    // Informe final: todos los puntos cubiertos
     if (replyText.includes('CHECKLIST DE ESPECIFICACION') || replyText.includes('ESPECIFICACION TECNICA COMPLETA')) {
       updateProgress(TOTAL_POINTS);
     }
@@ -259,7 +263,8 @@
     label.textContent = role === 'user' ? 'Tu' : role === 'gpt' ? 'GPT' : 'Error';
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.textContent = text;
+    // Eliminar la marca de control antes de mostrar el texto al usuario
+    bubble.textContent = text.replace(/\s*\[PUNTO_OK:\d+\]\s*$/m, '').trimEnd();
     wrap.appendChild(label);
     wrap.appendChild(bubble);
     historyEl.appendChild(wrap);
