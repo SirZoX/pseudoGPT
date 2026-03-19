@@ -1,0 +1,722 @@
+¡Hola! Empecemos con la especificación.
+
+Punto 1 — Exchange: ¿En qué exchange operará el robot? Opciones válidas: Binance, BingX o ambos.
+Tu
+binance
+GPT
+Registrado: Exchange = Binance.
+
+Punto 2 — Tipo de mercado: ¿Operará en Spot o en Futuros? Si eliges Futuros, indica si será solo long, solo short o long y short.
+Tu
+solo spot
+GPT
+Registrado: Mercado = Spot.
+
+Punto 3 — Timeframes: ¿Qué timeframes utilizará el robot para evaluar señales? Válidos: 5m, 15m, 30m, 1h, 4h, 1d, 1w. Indica todos los que aplican (por ejemplo: 15m y 1h).
+Tu
+los va a usar todos, y en todos ellos detectará señales en base a las condiciones que se establezcan
+GPT
+Registrado: Timeframes = 5m, 15m, 30m, 1h, 4h, 1d, 1w (señales evaluadas en todos).
+
+Punto 4 — Condiciones de entrada: Indica la primera condición de entrada con este formato: indicador, parámetros, timeframe y umbral/evento. Ejemplo: “Cruce EMA50 sobre EMA200 en 15m” o “RSI(14) > 60 en 1h”. Si habrá más condiciones, aclara si se combinan con AND u OR respecto a esta primera.
+Tu
+Cruce EMA50 sobre EMA200 + rsi de 14 períodos por encima de 30
+GPT
+Registrado: Entrada propuesta = Cruce EMA50 sobre EMA200 + RSI(14) > 30. Falta definir los timeframes de evaluación y, por ahora, asumo lógica AND entre ambas. Nota: RSI(14) > 30 suele cumplirse gran parte del tiempo; mantendré ese umbral salvo que indiques otro más restrictivo.
+
+Punto 4 — Condiciones de entrada: ¿En qué timeframe(s) se evalúa cada condición? Indica si ambas se evalúan en el mismo (ej.: 15m) o si usas multi-timeframe (ej.: cruce en 15m y RSI en 1h).
+Tu
+se deben cumplir las dos condiciones por cada tf, es decir, si se cumple condición A en 15m, pero no la condición B. y en 3m se cupmle B pero no A, esto NO es una entrada
+se debe cumplir A y B para el mismo tf
+GPT
+Entendido: ambas condiciones (Cruce EMA50>EMA200 y RSI(14)>30) deben cumplirse en el mismo timeframe. Nota: “3m” es inválido; trabajaremos con 5m, 15m, 30m, 1h, 4h, 1d y 1w.
+
+Punto 4 — Condiciones de entrada: ¿La señal se confirma al cierre de la vela del timeframe correspondiente (no intrabar), o permitimos entrada intrabar en cuanto se detecta el cruce y RSI>30?
+Tu
+no, al cierre de velas siempre
+GPT
+Registrado: Entrada en cierre de vela cuando, en un mismo timeframe, EMA50 cruza por encima de EMA200 y RSI(14) > 30 (lógica AND), evaluado en 5m, 15m, 30m, 1h, 4h, 1d y 1w.
+
+Punto 5 — Tipo de entrada: ¿La orden de entrada será Market o Limit? Si eliges Limit, indica el precio de colocación (ej.: al close de la vela de señal, a un retroceso del 0.3%, best bid, etc.).
+Tu
+entrada a limit.
+cuando se cierra la vela, se pone la orden de entrada limit a 0.5% por debajo del cierre
+GPT
+Registrado: Entrada Limit al cierre de la vela de señal, colocando la orden a -0.5% del cierre.
+
+Punto 6 — Condiciones de salida: Define todas las reglas de cierre y su prioridad/coexistencia. Indica al menos:
+- Stop Loss (ej.: 2% desde el precio de entrada)
+- Take Profit (uno o varios niveles; si hay parciales, especifica porcentajes)
+- Trailing Stop (activación y distancia)
+- Break-even (cuándo mover a precio de entrada)
+- Cierre por indicador (ej.: cruce EMA50<EMA200, RSI<30)
+- Cierre por tiempo (ej.: máximo X velas/horas)
+- Cierre manual permitido y/o por evento de riesgo
+
+Ejemplo compacto: SL 2%, TP 4% (100% de la posición), trailing 1% activado a +2%, break-even a +1%, cierre por cruce EMA50<EMA200, máximo 72h, prioridad: SL/TP/trailing > indicador > tiempo.
+Tu
+los % de TP y SL se calculan en base a un valor que se pondrá en una web, por tanto se deberá consultar a esa web. Para esto habrá que generar una API con sus respectivos endpoints para sacar la info necesaria para que el bot opere puesto que habrá distintos usuarios y cda uno configurará lo que quiera en su plataforma privada. 
+no hay Trailing, ni breakeven ni por indicadores. únicamente TP y SL
+GPT
+Registrado: Salidas = solo Take Profit y Stop Loss, con porcentajes obtenidos dinámicamente desde una web por usuario. Sin trailing, sin break-even, sin cierre por indicadores.
+
+Punto 6 — Condiciones de salida: ¿Quieres que, al ejecutarse la entrada, el bot coloque inmediatamente una OCO en Binance Spot (TP como limit y SL como stop-limit)? Nota: en Binance Spot la OCO solo admite stop-limit; si prefieres stop-market para el SL, no se podría usar OCO y el bot debería gestionar dos órdenes separadas cancelando la otra al ejecutar una. Indica tu preferencia.
+Tu
+sí, prefiero orden tipo OCO puesta en cuanto se ejecute la orden de entrada, por lo que habrá algún sistema que monitoriza las órdenes de entrada para ver si están ejecutadas y entonces lanzar las oco
+GPT
+Registrado: Salidas mediante OCO en Binance Spot, colocada inmediatamente tras ejecutarse la entrada; TP y SL se obtienen desde tu web por usuario. Sin trailing, sin break-even, sin cierres por indicadores.
+
+Punto 6 — Condiciones de salida: ¿El Take Profit cierra el 100% de la posición, o deseas tomar ganancias parciales? Nota: una OCO en Spot solo permite un TP único; para parciales habría que usar otro esquema.
+Tu
+100% de la posición, no quiero parciales
+GPT
+Registrado: TP/SL con OCO en Spot, 100% de la posición, sin parciales.
+
+Punto 6 — Condiciones de salida: En la pata de stop-limit de la OCO se requieren 2 precios. ¿Cómo calculamos el stop y el limit respecto al SL%? Ejemplos válidos:
+- Opción A: Stop = -SL% desde la entrada; Limit = Stop − 0.1% adicional.
+- Opción B: Stop = -SL%; Limit = igual al Stop.
+- Opción C: Indica otro offset fijo (ej.: 0.2%) o relativo.
+
+Indica tu preferencia.
+Tu
+opcion A
+GPT
+Confirmado: OCO en Spot con TP/SL desde tu web; TP 100%; Stop-limit Opción A (Stop = -SL% desde la entrada; Limit = Stop − 0.1%).
+
+Punto 6 — Condiciones de salida: Si la orden Limit de entrada se ejecuta parcialmente, ¿colocamos una OCO por la cantidad llenada en cada fill, o esperamos al fill total para colocar una única OCO? Opciones:
+- Por fill: crear/ajustar OCO inmediatamente por la cantidad ejecutada acumulada.
+- Tras fill total: no colocar OCO hasta completar el 100% de la entrada.
+Tu
+variante:
+si la orden de entrada se ejecuta parcialmente, ponemos OCO por la cantidad ejecutada y cancelamos la limit de entrada que queda pendiente. No quiero cosas a medias
+GPT
+Confirmado: si la entrada se ejecuta parcialmente, se coloca una OCO por la cantidad ejecutada y se cancela el remanente de la orden limit de entrada.
+
+Punto 6 — ¿Permitimos cierre manual? Indica una opción:
+- A) Sí: si el usuario cierra manualmente (exchange o panel), el bot cancela la pata restante de la OCO y marca la posición como cerrada.
+- B) No: el bot intentará restablecer órdenes si detecta cierres manuales (no recomendado).
+- C) Solo desde el panel web: se bloquean cierres manuales directos en el exchange y el bot cancela/gestiona la OCO al cerrar desde el panel.
+Tu
+A
+el usario siempre va a poder cerrar posiciones manualmente desde exchange, así que el robot debe ser semnsible a esto y detectarlo. 
+Si detecta un cierre, debe obtener la información relevante del cierre: pnl, precio de salida, hora de salida... toda la info relevante para poder luego documentarlo
+GPT
+Registrado: Cierre manual permitido. El bot detectará cierres manuales en el exchange y registrará PnL, precio y hora de salida (y demás datos relevantes), cancelando la pata restante de la OCO.
+
+Punto 6 — Condiciones de salida: Si el usuario cambia sus TP/SL en la web después de abrir una posición, ¿quieres que el bot actualice dinámicamente la OCO activa para esa posición, o que esos cambios apliquen solo a nuevas entradas? Indica una opción: actualizar OCO activa o solo nuevas entradas.
+Tu
+no, la posición abierta se queda como está. Los valores son inamovibles y solo se tienen en cuenta en el momento de apertura
+GPT
+Confirmado en salidas: solo TP y SL desde tu web; OCO en Spot tras ejecutar la entrada; TP 100%; stop-limit Opción A (limit = stop − 0.1%); si la entrada es parcial, OCO por la cantidad ejecutada y se cancela el remanente; cierre manual permitido y auditado; cambios de TP/SL posteriores no modifican posiciones abiertas. Sin trailing, break-even ni cierres por indicadores.
+
+Punto 6 — ¿Deseas incorporar cierre por tiempo o por evento de riesgo? Ejemplos:
+- Cierre por tiempo: cerrar si no se ejecuta TP/SL en X velas u horas.
+- Evento de riesgo: volatilidad extrema, error crítico del bot, desanclaje de stablecoin, etc. En tal caso, ¿cerrar mercado y cancelar órdenes?
+
+Indica si aplican y sus parámetros, o confirma que no habrá ninguno adicional.
+Tu
+cierre por tiempo si, 24hrs máximo y si no se ha cerrado, cierre por timeout
+por volatilidad no
+GPT
+Registrado: Cierre por tiempo = 24 horas; sin cierre por volatilidad.
+
+Punto 6 — Cierre por tiempo: Al cumplirse las 24h sin TP/SL, ¿cómo debe ejecutar el cierre?
+- A) Cancelar la OCO y cerrar a Market inmediatamente.
+- B) Cancelar la OCO y cerrar con una Limit al último precio (con timeout de, por ejemplo, 10s y fallback a Market).
+- C) Indica otra opción.
+Tu
+cierre a market de la posición y cancelación de las órdenes oco
+GPT
+Registrado: en timeout de 24h se cierra a Market y se cancelan las OCO asociadas.
+
+Sobre la pata stop-limit de la OCO: si se activa el stop y la orden limit no se ejecuta completamente (gap o poca liquidez), ¿quieres un fallback a Market tras un tiempo? Opciones:
+- A) Sin fallback: dejar la limit hasta que se ejecute o el usuario intervenga.
+- B) Con fallback: si no se llena en N segundos, cancelar la limit restante y cerrar a Market. Indica N.
+Tu
+No quiero parciales, si se detecta una parcialidad, se cierra a market inmediatamente y cierra por completo la posición, no deben quedar órdenes del mismo par abiertas
+GPT
+Confirmado en salidas: OCO en Spot con TP/SL desde la web; TP 100%; stop-limit Opción A; cierre manual permitido y auditado; timeout 24h cierra a Market y cancela OCO; si la pata stop-limit se ejecuta parcialmente, se cierra inmediatamente a Market el remanente y no quedan órdenes abiertas del mismo par.
+
+Punto 7 — Gestión de posiciones: Define cómo gestiona posiciones el bot. Indica:
+- Máximo de posiciones por par: una por par o múltiples simultáneas.
+- DCA/pyramiding: permitido o no.
+- Reentrada tras cierre: permitida inmediatamente o con enfriamiento (ej.: X velas).
+- Cierres parciales: confirmo que NO.
+- Movimiento dinámico de stop: confirmo que NO.
+
+Ejemplo: “Una por par, sin DCA/pyramiding, reentrada permitida tras cierre sin enfriamiento, sin parciales, sin mover stop.”
+Tu
+max 1 posicion por par
+max N posiciones en total configurables por settings
+si se intenta abrir una segunda posición de un par ya abierto, se descarta y no se abre
+si se intenta abrir una posición cuando ya existe N posiciones que es el máximo, se descarta y no se abre
+no hay enfriamento
+no hay dca
+no hay cierres parciales
+no hay stop dinámico
+GPT
+Registrado: Gestión de posiciones = máx. 1 posición por par; tope global N posiciones (configurable); intentos adicionales se descartan si ya hay posición en el par o si se alcanzó N; sin cooldown (reentrada inmediata tras cierre); sin DCA; sin cierres parciales; sin stop dinámico.
+
+Punto 7 — ¿Confirmas que NO se permitirá pyramiding (no añadir a una posición ya abierta del mismo par en ningún caso)?
+Tu
+confirmo
+GPT
+Confirmado: pyramiding deshabilitado en todos los casos.
+
+Punto 8 — Settings configurables: Para el parámetro “Máximo de posiciones abiertas en total (N)”, indica valores de:
+- valor por defecto
+- mínimo permitido
+- máximo permitido
+Tu
+5 simultáneas es el máximo
+miniom 0 si no hay posiciones abiertas
+por defecto no hay. Es decir, solo se limita a un máxmio de 5 posiciones abiertas
+GPT
+He detectado una inconsistencia: para “Máximo de posiciones abiertas (N)” necesitamos un valor por defecto concreto dentro del rango. Propones máximo 5 y mínimo 0, pero “por defecto no hay” no es un valor.
+
+¿Confirmas estos valores para N? 
+- mínimo: 0 (pausa total)
+- máximo: 5
+- por defecto: 5
+
+Responde “sí” para confirmar o indícame el valor por defecto que prefieras dentro de [0, 5].
+Tu
+si
+GPT
+Registrado: Máximo de posiciones abiertas (N) = min 0, max 5, por defecto 5.
+
+Punto 8 — Settings configurables: ¿El monto de inversión por operación será configurable por usuario? Si sí, indica moneda (p. ej., USDT) y los valores: defecto, mínimo y máximo. Si no, indícame el monto fijo.
+Tu
+inversión por posición, en usdt. no hay máximo, minimo 10, default 30
+debe poder elegirse pares a ignorar, que luego no se tienen en cuenta y nunca se puede abrir posiciones
+alguno otro que se te ocurra?
+GPT
+Registrado: Settings — inversión por posición en USDT: mínimo 10, por defecto 30, sin máximo; lista de pares a ignorar (nunca abrir posiciones en ellos).
+
+¿Confirmas dejar “inversión por posición” sin máximo, o prefieres establecer un máximo (por ejemplo, 1,000 USDT)? Indica “sin máximo” o especifica el tope deseado.
+Tu
+sin máximo
+GPT
+Registrado: inversión por posición en USDT = mínimo 10, por defecto 30, sin máximo; lista de pares a ignorar.
+
+Punto 8 — Settings configurables: Define los rangos y valores por defecto para SL% y TP% que devolverá tu web y el bot validará. Ejemplo sugerido: SL% min 0.5, max 10, default 2; TP% min 0.5, max 20, default 4. ¿Qué valores quieres?
+Tu
+TP max 100%
+default 20
+minimo 2
+
+SL max 100% (liquidación)
+default 20
+minimo 2
+GPT
+Registrado: TP% = min 2, default 20, max 100; SL% = min 2, default 20, max 100.
+
+Punto 8 — Settings configurables: Si la web devuelve TP/SL fuera de rango, ¿cómo debe actuar el bot?
+- A) Rechazar la señal y no abrir posición (log de error).
+- B) Ajustar al límite permitido (clamp) y abrir.
+- C) Registrar el error y usar los valores por defecto (20%/20%). ¿Cuál prefieres?
+Tu
+ajustar a los limites máximos/minimos permitidos y abrir posiciones e informar al usuario
+GPT
+Registrado: Si TP/SL están fuera de rango, se ajustan a los límites y se notifica al usuario.
+
+Punto 8 — Settings configurables: ¿Deseas que el offset de entrada Limit (actualmente -0.5% bajo el cierre) sea configurable por usuario? Si sí, indica mínimo, máximo y valor por defecto (ej.: min 0%, max 2%, default 0.5% por debajo del cierre). Si no, confirmo que queda fijo en -0.5%.
+Tu
+no es configurable
+GPT
+Registrado en Settings: 
+- Máximo de posiciones abiertas (N): min 0, max 5, por defecto 5.
+- Inversión por posición (USDT): min 10, por defecto 30, sin máximo.
+- Lista de pares a ignorar.
+- TP%: min 2, default 20, max 100. SL%: min 2, default 20, max 100.
+- Si TP/SL fuera de rango: se ajusta a límites y se notifica.
+- Offset de entrada Limit: fijo -0.5% bajo el cierre.
+
+Punto 8 — Settings configurables: ¿El tiempo máximo de posición (timeout) quieres que sea configurable por usuario? Si sí, indica mínimo, máximo y valor por defecto. Si no, confirmo que queda fijo en 24 horas.
+Tu
+no es cnofigurable por el usuario, definido a 24h fijo por código
+GPT
+Registrado: Timeout fijo de 24h, no configurable por el usuario.
+
+Punto 9 — Filtros de riesgo: ¿Quieres activar filtros de riesgo diarios (por ejemplo: máximo drawdown diario, máximo número de pérdidas diarias, límite de operaciones diarias)? Responde “sí” para configurarlos o “no” para omitirlos.
+Tu
+no
+GPT
+Registrado: Sin filtros de riesgo diarios (sin drawdown máximo, sin límite de pérdidas ni de operaciones diarias).
+
+Punto 10 — Filtros de mercado: ¿Quieres activar alguno? Opciones típicas: volatilidad mínima, volumen mínimo, spread máximo, horario de trading, evitar fines de semana, evitar noticias. Indica “no” si no aplicarás ninguno o especifica cuáles y sus parámetros.
+Tu
+si
+volumen del par debe ser minimo 6.500.000 usdt en las últimas 24hrs, sin máximo, ni default
+volumen de la última vela cerrada, minimo debe ser de 25.000 usdt, sin máximo ni default
+spread no se tiene en cuenta
+no hay horarios de apertura o cierre
+noticias? no se detecta de ninguna manera, el robot opera en base a números
+esos valores son configurables desde la web y serán comunes a todos los clientes
+GPT
+Registrado: Filtros de mercado desde la web (comunes a todos los clientes):
+- Volumen 24h del par ≥ 6,500,000 USDT.
+- Volumen de la última vela cerrada ≥ 25,000 USDT.
+- Sin filtro de spread, sin horario de trading, sin filtro de noticias.
+
+Falta precisar: dado que el robot opera en múltiples timeframes, ¿el filtro “volumen de la última vela cerrada ≥ 25,000 USDT” se evalúa en el mismo timeframe que genera la señal (por ejemplo, 15m si la señal es en 15m), o en un timeframe fijo (por ejemplo, siempre 15m o 1h)? Indica “mismo timeframe de la señal” o especifica un timeframe fijo.
+Tu
+mismo timeframe de la señal
+GPT
+Registrado: Filtros de mercado activos — Volumen 24h del par ≥ 6,500,000 USDT (dato de exchange); Volumen de la última vela cerrada ≥ 25,000 USDT evaluado en el mismo timeframe de la señal; sin filtro de spread; sin horarios (opera 24/7, incluidos fines de semana); sin filtro por noticias. Valores configurables desde la web, comunes a todos los clientes.
+
+Punto 11 — Logging: ¿Prefieres log simple (eventos clave) o log verboso (incluye cálculos, decisiones y respuestas de API) para ejecución y depuración?
+Tu
+verboso,
+el logging se registra localmente
+cada día un fichero que de nombre tiene la fecha actual en formato aaaa_mm_dd
+se debe guardar en la carpeta /logs
+dentro de /logs se debe generar una carpeta por cada año y mes, es decir: 2026-01, 2026-02, 2025-03...
+el log debe registrar eventos tipo INFO, DEBUG, ERROR, CRITICAL, API,
+el log debe ser un fichero csv, separado por comas
+los valores deben ir entrecomillados
+campos como minimo: timestamp (hasta segundos, milisegundos no, fecha en formato dd/mm/aaaa hh:ii:ss), par sobre el que se ejecuta la acción (sin el USDT), debe indicar la función que genera el log y el nombre del fichero en formato "file.function", y finalmente el texto
+el texto debe incluir las variables involucradas en ese evento
+GPT
+Registrado logging: verboso, local, rotación diaria, archivo con nombre aaaa_mm_dd.csv dentro de /logs/AAAA-MM/, niveles INFO/DEBUG/ERROR/CRITICAL/API, formato CSV separado por comas con todos los valores entrecomillados, campos mínimos: timestamp (sin ms), par (sin sufijo USDT), origen “file.function”, y texto con variables relevantes.
+
+Aclaración: indicaste el timestamp como dd/mm/aaaa hh:ii:ss. ¿Confirmas que debe ser dd/mm/aaaa hh:mm:ss (minutos = mm)?
+Tu
+si
+GPT
+Confirmado: timestamp en logs = dd/mm/aaaa hh:mm:ss.
+
+Punto 11 — Monitorización y notificaciones: ¿Qué eventos deseas notificar y por qué canal? Opciones típicas:
+- Eventos: apertura de orden, ejecución de entrada, OCO colocada, cancelación por timeout 24h, SL/TP ejecutado, intento bloqueado por filtros/posiciones, error API, cierre manual detectado.
+- Canales: Telegram, email.
+Indica también si quieres notificar solo ERROR/CRITICAL o también INFO importantes, y si las notificaciones son globales o por usuario.
+Tu
+se notifica solo cierres y por telegram, no hay más canales ni notificaciones. Todo se loguea, pero solo se notifica por telegram los cierres, indicando el par y el profit o loss
+GPT
+Registrado: logging verboso local en CSV con rotación diaria; notificaciones solo por Telegram, exclusivamente en eventos de cierre, incluyendo par y P/L.
+
+Para cerrar el punto 11, confirma qué cierres generan notificación: ¿TP ejecutado, SL ejecutado, cierre manual, cierre por timeout de 24h y cierre forzado por ejecución parcial del stop-limit? Responde “sí, todos” o indica cuáles aplicar.
+Tu
+todos
+GPT
+Confirmado punto 11: logging verboso local en CSV con rotación diaria en /logs/AAAA-MM/aaaa_mm_dd.csv; timestamp dd/mm/aaaa hh:mm:ss; niveles INFO/DEBUG/ERROR/CRITICAL/API; y notificaciones solo por Telegram en TODOS los cierres (TP, SL, manual, timeout 24h, cierre por parcial en stop-limit) con par y P/L.
+
+Punto 12 — Seguridad operativa: Indica Sí/No y el comportamiento para cada protección:
+- Anti-duplicado de posiciones por par (ya implícito): ¿activar verificación extra en tiempo real para evitar race conditions?
+- Pérdida de conexión con el exchange: ¿pausar nuevas entradas y mantener órdenes existentes, o cancelar órdenes abiertas y cerrar posiciones al reconectar? Especifica reintentos (p. ej., backoff exponencial hasta 5 min) y tiempo de “pausa de trading”.
+- Watchdog del proceso: ¿auto-reinicio si el bot se cuelga o deja de emitir heartbeats en X segundos? Indica X.
+- Kill switch: ¿comando para cerrar todas las posiciones y cancelar todas las órdenes inmediatamente? Indica cómo se activa (panel web, archivo bandera local, comando Telegram).
+Tu
+antiduplicado si
+pérdida nada, si se pierde la conexión se espera a que vuelva, sin devolver errores ni registrar nada
+watdog sí
+kill switch no
+GPT
+Registrado en seguridad operativa: anti-duplicado = sí; ante pérdida de conexión = esperar a reconexión, sin notificar; watchdog = sí; kill switch = no. Nota: “sin registrar nada” entra en conflicto con el logging verboso definido (todo se loguea).
+
+¿Confirmas que, aunque no haya notificaciones ni errores, sí se registrarán en el log eventos INFO/API al detectar pérdida y recuperación de conexión? Responde “sí” o “no”.
+Tu
+si
+GPT
+Registrado: Seguridad — anti-duplicado activo; ante pérdida de conexión se espera reconexión (sin notificaciones), pero se loguean eventos INFO/API de pérdida y recuperación; kill switch deshabilitado. Falta concretar el watchdog.
+
+Punto 12 — Watchdog: ¿Cada cuántos segundos sin “heartbeat” debe reiniciar el bot y con qué backoff de reintento? Ejemplo: si no hay heartbeat en 60s, reiniciar proceso; reintentos ilimitados con backoff 10s entre intentos. Indica umbral (s) y backoff (s).
+Tu
+60s, 10 intentos
+GPT
+Registrado: Watchdog con umbral 60s y 10 intentos.
+
+Falta definir el backoff entre intentos de reinicio. ¿Cuántos segundos deben transcurrir entre cada intento? Ejemplo: 10s.
+Tu
+30s
+GPT
+Confirmado Seguridad: anti-duplicado activo; ante pérdida de conexión se espera reconexión y se registran eventos INFO/API; watchdog: umbral 60s, 10 intentos, backoff 30s; sin kill switch.
+
+Punto 13 — Licencias: ¿El robot será de uso personal o de venta comercial para terceros?
+Tu
+comercial
+GPT
+Registrado: Licencias = venta comercial para terceros.
+
+Punto 13 — ¿Cómo se valida la licencia? Ejemplos:
+- Opción A: Validación online contra tu API (el bot envía license_key + user_id y recibe OK/denegado).
+- Opción B: Archivo/JWT firmado con expiración (verificación offline) y revalidación online cada X horas.
+- Opción C: Vínculo a la API key del exchange (se valida que la licencia esté asociada a esa cuenta).
+Indica tu preferencia o describe el flujo exacto.
+Tu
+A, pero ya estableceremos qué devuelve la api para dar el ok y cómo validarlo, no será algo tan simple como un 1 o 0
+busco un sistema que confunda, un string de 128 carácteres por ejemplo, que en el carácter 27 haya siempre un número entre 1 y 9. ese número indica el número de posiciones desde esa misma posición donde hay que buscar una "O" para licencia válida y una "n" para licencia no válida por ejepmlo
+el resto de carácteres son alfanuméricos y símbolos randomizados
+GPT
+Registrado: Licencias con validación online vía API y esquema de ofuscación basado en string de 128 caracteres con regla posicional; detalles pendientes de precisión.
+
+¿Confirmas que el índice es 1-based (el primer carácter es posición 1) y que el desplazamiento N se aplica hacia la derecha desde la posición 27, sin wrap-around?
+Tu
+confirmo que es un string de 128 carácteres
+los ñultimos dos deben ser un == para simular un base64 encoded
+en la posición 27 (empezando de posición 1, es decir, 1-based) debe salir siempre un digito entre 1 y 9
+eso indicará la posición, a partir del carácter 28, donde se debe encontrar un "O", o un "n" (ok y ko respectivamente a la licencia)
+por tanto, la posición 27 puede ser un 2 por ejemplo, entonces en la posición 29 debe haber un "O" o "n"
+GPT
+Registrado licencias: validación online vía tu API con string de 128 caracteres, terminación “==” en las dos últimas posiciones; posición 27 (1-based) contiene un dígito 1–9; el carácter válido “O” o “n” se verifica en la posición 27 + dígito (ejemplo: si es 2, se comprueba la posición 29).
+
+Punto 13 — Duración de licencia: ¿Cuál es la duración de la licencia (mensual, anual, perpetua) y qué sucede al expirar (gracia, bloqueo inmediato, cierre de posiciones abiertas, etc.)? Indica también si habrá revalidación periódica (por ejemplo, cada 24h) para detectar expiraciones.
+Tu
+licencia mensual, anual y perpétua.
+si expira, el bot deja de funcionar. las posiciones abiertas se quedan como están. 
+las expiraciones se detectan en un proceso automático a las 00.01 todos los días
+GPT
+Registrado: Licencia mensual, anual o perpetua; al expirar el bot se detiene y las posiciones abiertas quedan sin tocar; expiraciones detectadas por un proceso diario a las 00:01.
+
+Punto 13 — Control de cuentas/usuarios: ¿A qué se vincula cada licencia y cuántas instancias simultáneas permite? Opciones:
+- A) user_id + 1 API key de Binance por licencia, 1 instancia simultánea.
+- B) user_id + hasta N API keys (indica N), 1 instancia por API key.
+- C) user_id + fingerprint de máquina/host, 1 instancia simultánea.
+- D) Define tu propia regla (por ejemplo: user_id + API key, máximo 2 instancias por licencia, etc.).
+Tu
+solo puede haber una instancia por tupla apikey+host fingerprint (uuid del equipo)
+GPT
+Registrado: control de licencias = 1 instancia por tupla API key + host fingerprint (UUID del equipo).
+
+Punto 13 — Si la API de licencias no responde (caída o timeout), ¿cómo procede el bot?
+- Opción A: En arranque permite ejecutar con la última licencia válida hasta 24h; en el chequeo diario mantiene operativa y reintenta cada 15 min; si pasan 24h sin validar, se detiene.
+- Opción B: En arranque bloquea hasta validar; en funcionamiento mantiene operativa y reintenta cada 15 min; si pasan 6h sin validar, se detiene.
+- Opción C: Indica tu propia política (gracia, reintentos, y cuándo detener).
+Tu
+esperamos a la siguiente comprobación, no es problema
+GPT
+Registrado: si la API de licencias no responde, se espera a la siguiente comprobación.
+
+Para cerrar licencias, ¿confirmas lo siguiente? En arranque el bot inicia usando el último estado de licencia válido aunque la API no responda; la validación se hace solo a las 00:01 diarias; si a las 00:01 la API no responde, el bot sigue operativo hasta el siguiente intento diario, sin notificar pero quedando registrado en el log. ¿Sí?
+Tu
+si
+GPT
+Registrado en licencias: el bot puede arrancar con la última licencia válida; la validación ocurre a las 00:01; si la API no responde se mantiene operativo hasta el siguiente intento y se registra en log.
+
+Punto 14 — Panel web de gestión: ¿Habrá panel web de gestión? Responde sí o no. Si es sí, en los siguientes turnos definimos login, home, secciones y roles de acceso.
+Tu
+sí
+login con usuario telegram incluida la arroba, clave la apikey de binance
+home muestra un gráfico de profits desde que empezó
+una tabla con las posiciones abiertas más recientes, (tabla dinámica, mostrando 20 registros)¨. De cada posición se muestra: par (sin usdt), fecha entrada, fecha salida, tiempo transcurido, inversión, razón de cierre (tp, sl, timeout, manual), pnl, label decorado que ponga profit o loss (fondo verde o rojo según corresponda)
+en un bloque inferior debe mostrar toda la configuración que el usuario pueda tocar (todos los settings)
+según su nivel de acceso podrá editar algunos y otros no, esto lo definiremos en el punto 15 cuando me des una lista de todos los settings que hemos ido poniendo por el camino hasta aquí
+roles de acceso: usuario normal, usuario admin, usuario trader
+el admin podrá editar todos los settings
+el trader tiene además un formulario que el resto no ve que dice qué moneda operar, en qué precio entrar y yaveremos si algo más
+GPT
+Registrado Panel Web: 
+- Login: usuario = @Telegram, clave = API key de Binance (observación: alto riesgo de seguridad).
+- Home: gráfico de profit acumulado desde inicio; tabla dinámica (20 filas) con par, fechas entrada/salida, tiempo transcurrido, inversión, razón de cierre, PnL y etiqueta Profit/Loss; bloque inferior con settings editables según rol.
+- Roles preliminares: normal, admin, trader; admin edita todo; trader con formulario extra para órdenes manuales (par y precio). 
+Nota: hay una inconsistencia en Home: “posiciones abiertas” pero la tabla incluye campos de cierre; parece más bien un historial reciente.
+
+Pregunta (login/seguridad): ¿Cambiamos a autenticación “usuario Telegram + contraseña propia del panel (hash/BCrypt), con 2FA TOTP opcional y recuperación de contraseña”, en lugar de usar la API key de Binance como contraseña? Responde “sí” para aplicar este modelo más seguro, o “no” para mantener tu propuesta actual.
+Tu
+no, no veo necesario complicarlo tanto, la apikey ya es un valor complejo por si mismo, largo, alfanumérico
+GPT
+Registrado Panel Web: login con usuario Telegram (@handle) y contraseña = API key de Binance; Home con gráfico de profit acumulado, tabla dinámica de 20 registros, bloque inferior con settings según rol; roles: normal, admin, trader; trader con formulario para órdenes manuales.
+
+Inconsistencia detectada: la tabla dice “posiciones abiertas” pero incluye fecha/razón de cierre, lo que corresponde a historial. ¿Cuál opción quieres para la Home?
+- A) Historial de las últimas 20 operaciones cerradas (mantiene fecha salida y razón de cierre).
+- B) Posiciones abiertas actuales (sin fecha/razón de cierre; campos sugeridos: par, fecha entrada, inversión, tiempo transcurrido, SL, TP, PnL no realizado). Indica A o B.
+Tu
+A
+GPT
+Registrado Home: opción A — Historial de las últimas 20 operaciones cerradas + gráfico de profit acumulado y bloque inferior con settings editables según rol. Login: usuario = @Telegram y contraseña = API key de Binance (según lo indicado).
+
+Punto 14 — Login: ¿Habrá recuperación de contraseña en el panel? Ten en cuenta que la “contraseña” es la API key; la recuperación implicaría registrar una nueva API key. Opciones: 
+- Sí, recuperación (p. ej., solicitud en el panel y confirmación por mensaje a Telegram del usuario).
+- No, sin recuperación (solo cambio manual desde el panel introduciendo la nueva API key estando logueado).
+
+Indica tu preferencia.
+Tu
+no
+GPT
+Registrado en Login del panel: usuario = @Telegram, contraseña = API key de Binance; sin recuperación de contraseña.
+
+Punto 14 — Login: ¿Deseas habilitar 2FA TOTP opcional (por ejemplo, Google Authenticator) para el acceso al panel? Responde sí o no.
+Tu
+no
+GPT
+Registrado: 2FA deshabilitado. Login del panel: usuario = @Telegram, contraseña = API key de Binance; sin recuperación.
+
+Punto 14 — Secciones y accesos: Indica qué secciones tendrá el panel y qué roles (normal, trader, admin) pueden ver y/o editar cada una. Ejemplos de secciones: dashboard/home, operaciones abiertas, historial, configuración, licencias, logs, usuarios, estadísticas. Especifica para cada sección: acceso de lectura y si alguno puede editar.
+Tu
+home la ven todos
+historial la ven todos, cada uno ve su propio historial. Si eres admin o trader debe aparecer un desplegable con los usuarios y al cambiar el desplegable deberíamos poder ver el historial de ese usuario
+configuración la ven todos, cada uno la suya propia, sin posibilidad de ver la del resto
+licencias es un apartado que sólo ve admin y trader y debe listar las licencias, @usuario, fecha de alta y fecha de expiración
+logs no debe ni existir
+usuarios debe ser un CRUD completo para la gestión total de los usuarios de la plataforma: usuario, clave, licencia, pagos, fecha de alta, de expiración, tipo de usuario...
+stats no debe existir
+GPT
+Registrado Panel Web — Secciones y accesos:
+- Home: visible para todos.
+- Historial: visible para todos (cada uno ve el suyo). Admin y Trader pueden seleccionar otros usuarios en un desplegable.
+- Configuración: visible para todos (solo su propia configuración).
+- Licencias: visible solo para Admin y Trader (lista licencias con @usuario, fecha alta y expiración).
+- Logs: no existe.
+- Stats: no existe.
+
+Pregunta: ¿Qué roles pueden acceder a la sección “Usuarios” y con qué permisos (ver, crear, editar, bloquear, eliminar)? Indica permisos por rol (por ejemplo: Admin = CRUD completo; Trader = solo lectura; Normal = sin acceso).
+Tu
+admin y trader tienen poder absoluto, la diferencia entre ellos es que trader verá el formulario para abrir posiciones pero el admin no, el resto, tienen poderes absolutos
+GPT
+Registro actualizado del Panel Web:
+- Home: todos los roles.
+- Historial: todos (propio); Admin/Trader pueden cambiar usuario con desplegable.
+- Configuración: todos (solo su propia configuración).
+- Licencias: solo Admin y Trader.
+- Usuarios (CRUD): pendiente de permisos definitivos.
+- Logs/Stats: no existen.
+Nota: detecto inconsistencia en tu última respuesta sobre “poderes absolutos” para “el resto”.
+
+Confírmame los permisos de la sección “Usuarios (CRUD)”: ¿queda así?
+- Admin: CRUD completo
+- Trader: CRUD completo
+- Usuario normal: sin acceso
+
+Si no es así, indícame exactamente qué puede hacer cada rol en “Usuarios”.
+Tu
+si
+GPT
+Registrado Panel Web — Secciones y accesos confirmados: 
+- Home: todos.
+- Historial: todos (propio); Admin/Trader pueden ver otros usuarios vía desplegable.
+- Configuración: todos (solo la propia).
+- Licencias: solo Admin y Trader.
+- Usuarios (CRUD): Admin y Trader con permisos completos; Usuario normal sin acceso.
+
+Punto 14 — Para cerrar el panel, define el formulario exclusivo del rol Trader: especifica los campos obligatorios y el comportamiento al enviar (tipo de orden Market/Limit, precio si es Limit, inversión USDT, si usa TP/SL por defecto del usuario o permite override, timeout de la Limit si no ejecuta, y si debe respetar filtros de mercado y límites de posiciones del bot). ¿Cómo quieres que funcione exactamente?
+Tu
+el robot funciona con lo que el trader indique
+debe tener un campo para poner el par (sin usdt, hay que indicarlo)
+un campo para precio de entrada
+el resto del flujo ya s eha especificado en pasos anteriores
+GPT
+Registrado formulario Trader: campos mínimos = par (sin “USDT”) y precio de entrada; el resto del flujo sigue lo ya definido (OCO, TP/SL desde web, timeout, etc.).
+
+¿Confirmas que la orden generada por el formulario Trader será de tipo Limit exactamente al precio indicado, aplicando las mismas reglas de OCO/TP/SL/timeout ya definidas? Responde sí o no.
+Tu
+si
+GPT
+Confirmado Panel Web: login, home, secciones, accesos y formulario Trader definidos.
+
+Punto 15 — Roles de usuario: Propongo permisos de edición de settings por rol. ¿Confirmas esta asignación?
+- Usuario normal: puede editar solo sus settings personales:
+  - inversión por posición (USDT)
+  - lista de pares a ignorar
+  - TP% y SL% (dentro de rangos)
+  - máximo de posiciones abiertas en total (N)
+- Trader: todo lo anterior + puede editar settings globales de mercado (volumen 24h mínimo y volumen mínimo de la última vela).
+- Admin: puede editar todos los settings (personales y globales), y gestionar usuarios y licencias.
+- No editables por ningún rol (fijos por diseño): offset de entrada (-0.5%) y timeout 24h.
+
+Responde “confirmo” o indica los cambios necesarios.
+Tu
+confirmo
+GPT
+Registrado: Roles y permisos confirmados — Usuario normal (edita sus settings: inversión, pares ignorados, TP/SL, N); Trader (además, edita filtros globales de mercado); Admin (edita todo y gestiona usuarios/licencias). Offset de entrada (-0.5%) y timeout (24h) son fijos.
+
+Punto 16 — Actualizaciones del robot: ¿Prefieres auto-actualización (el bot verifica un endpoint, descarga la nueva versión y se reinicia solo) o actualización manual (se notifica y el usuario debe actualizar por su cuenta)?
+Tu
+auto
+GPT
+Registrado: Actualizaciones = auto-actualización.
+
+Punto 16 — Durante la actualización, ¿el bot debe: A) actualizarse de inmediato aunque existan posiciones/órdenes activas, o B) posponer la actualización hasta que no haya posiciones abiertas ni órdenes activas? Indica A o B.
+Tu
+a
+GPT
+Registrado: Actualización inmediata incluso con posiciones/órdenes activas (opción A).
+
+Punto 16 — ¿Con qué frecuencia debe el bot comprobar si hay nueva versión? Opciones: cada 1h, cada 6h, cada 12h, 1 vez al día a una hora fija (indica hora y zona, ej. 03:00 UTC), u otra frecuencia.
+Tu
+todos los días a las 00.05
+GPT
+Registrado: Auto-actualización diaria a las 00:05, con actualización inmediata incluso si hay posiciones/órdenes activas.
+
+Punto 16 — ¿En qué zona horaria debe realizarse la comprobación diaria a las 00:05? Ejemplos: UTC, Europe/Madrid, America/Mexico_City.
+Tu
+hora de madrid
+GPT
+Registrado: zona horaria = Europe/Madrid.
+
+Punto 16 — Notificaciones de actualización: ¿Quieres notificar por Telegram cuando hay actualización disponible, cuando se actualiza con éxito y/o cuando falla? Opciones: ninguna, solo fallos, éxitos y fallos, o especifica.
+Tu
+solo cuando se haya actualizado, nada más
+GPT
+Registrado: notificación de actualización solo cuando se haya actualizado correctamente (Telegram).
+
+INFORME FINAL
+
+1 — ERRORES DETECTADOS
+- Riesgo crítico de seguridad: autenticación del panel usando la API key de Binance como contraseña. Exponer/almacenar la API key en el panel compromete fondos del usuario.
+- Ambigüedad en el formulario Trader: “el robot funciona con lo que el trader indique” podría interpretarse como saltarse filtros de mercado y el tope N. No está explícitamente aclarado.
+- Falta de definición operativa sobre rounding y validación de tamaños/precios (tickSize, stepSize, minNotional) de Binance. Sin esto, son probables rechazos de órdenes.
+- Ausencia de especificación del universo de símbolos a escanear (ej.: todos los pares Spot USDT menos ignorados). Puede causar comportamientos no deseados.
+- Falta de manejo explícito de insuficiencia de balance (qué hacer si no alcanza para la inversión definida).
+
+2 — MEJORAS RECOMENDADAS
+- Panel: sustituir “API key como contraseña” por credenciales propias + 2FA. Nunca almacenar/usar API key como password.
+- Definir el evento de cruce con precisión: cruce válido si en la vela anterior EMA50 <= EMA200 y en la vela de señal EMA50 > EMA200, para evitar repetición.
+- Incorporar validación y normalización a filtros de exchange: ajustar cantidad/precios a stepSize/tickSize y verificar minNotional antes de enviar órdenes.
+- Definir claramente si el formulario Trader respeta filtros de mercado y el límite N. Recomendado: permitir override explícito con flag visible de “forzar entrada”.
+- Añadir política de insuficiente balance: omitir operación o reducir tamaño hasta el máximo válido disponible.
+- Endpoints y seguridad backend: definir endpoints HTTPS para settings/licencias con firma/CSRF, y verify SHA256 + firma en auto-actualizaciones, con rollback si falla.
+- Gestión de tasa de llamadas y caché de velas por timeframe para no exceder rate limits al operar “todos los timeframes”.
+- Telegram: almacenar chat_id por usuario y notificar PnL en % y en USDT.
+
+3 — ESCENARIOS NO CONTEMPLADOS
+- Universo de símbolos a escanear (ej.: todos los pares XXXUSDT listados, excluyendo la “ignore list”).
+- Qué hacer ante errores de precisión/validación de Binance (tickSize/stepSize/minNotional) y ante insuficiencia de balance.
+- Falla de notificaciones de Telegram (token o chat_id inválidos): fallback y registro.
+- Pausas/mantenimiento de Binance y rate limit (retry/backoff por endpoint).
+- Delistings/cambios de filtros de un símbolo en caliente.
+- Diferencias horarias/ajuste horario (DST) en Europe/Madrid para tareas de 00:01 y 00:05.
+
+4 — CHECKLIST DE ESPECIFICACIÓN
+1 — Exchange: ✔
+2 — Tipo de mercado: ✔
+3 — Timeframes: ✔
+4 — Condiciones de entrada: ✔
+5 — Tipo de entrada: ✔
+6 — Condiciones de salida: ✔
+7 — Gestión de posiciones: ✔
+8 — Settings configurables: ✔
+9 — Filtros de riesgo: ✔
+10 — Filtros de mercado: ✔
+11 — Logging y monitorización: ✔
+12 — Seguridad operativa: ✔
+13 — Licencias: ✔
+14 — Panel web de gestión: ✔
+15 — Roles de usuario: ✔
+16 — Actualizaciones del robot: ✔
+
+5 — ESPECIFICACIÓN TÉCNICA COMPLETA
+
+1 — Exchange
+- Binance (Spot).
+
+2 — Tipo de mercado
+- Spot.
+
+3 — Timeframes
+- 5m, 15m, 30m, 1h, 4h, 1d, 1w.
+- Evaluación al cierre de vela, no intrabar.
+- Ambas condiciones deben cumplirse en el mismo timeframe.
+
+4 — Condiciones de entrada
+- Señal Long Spot cuando, en un mismo timeframe y al cierre de vela:
+  - Cruce EMA50 sobre EMA200 (cruce de oro).
+  - RSI(14) > 30.
+- Lógica AND entre ambas condiciones por timeframe.
+- Entrada se genera para cualquier timeframe válido que cumpla A y B (con tope de 1 posición por par).
+
+5 — Tipo de entrada
+- Orden Limit colocada al detectarse la señal: precio = close de la vela de señal − 0.5%.
+- Si la entrada se ejecuta parcialmente: colocar OCO por la cantidad ejecutada acumulada y cancelar el remanente de la Limit. No se mantiene “a medias”.
+
+6 — Condiciones de salida
+- Solo TP y SL, sin trailing, sin break-even, sin cierres por indicador.
+- TP/SL obtenidos dinámicamente desde la web por usuario en el momento de apertura. No se actualizan para posiciones ya abiertas.
+- OCO en Spot:
+  - TP: Limit por el 100% de la posición.
+  - SL: Stop-Limit con Opción A: Stop a -SL% desde entrada; Limit = Stop − 0.1% adicional.
+- Si la pata stop-limit se ejecuta parcialmente: cerrar inmediatamente el remanente a Market y no dejar órdenes abiertas del mismo par.
+- Timeout de posición: 24h desde la ejecución de la entrada; si no se cerró por TP/SL, cancelar OCO y cerrar a Market.
+- Cierre manual: permitido desde el exchange o panel; el bot detecta, cancela la pata restante de la OCO, y registra PnL, precio y hora.
+
+7 — Gestión de posiciones
+- Máx. 1 posición por par.
+- Límite global de posiciones abiertas: N (configurable; min 0, max 5, defecto 5).
+- Intentos de abrir una 2ª posición del mismo par o superar N: se descartan.
+- Reentrada permitida sin enfriamiento tras cierre.
+- Sin DCA, sin pyramiding, sin cierres parciales, sin stop dinámico.
+
+8 — Settings configurables
+- Máximo de posiciones abiertas (N): min 0, max 5, default 5.
+- Inversión por posición (USDT): min 10, default 30, sin máximo.
+- Lista de pares a ignorar (no operar nunca esos pares).
+- TP%: min 2, default 20, max 100.
+- SL%: min 2, default 20, max 100.
+- Si TP/SL fuera de rango: ajustar al límite permitido (clamp), abrir y notificar.
+- Fijos por diseño (no configurables): offset de entrada -0.5%; timeout 24h.
+- Filtros de mercado globales (desde la web, comunes a todos los clientes):
+  - Volumen 24h del par ≥ 6,500,000 USDT (dato del exchange).
+  - Volumen de la última vela cerrada ≥ 25,000 USDT, evaluado en el mismo timeframe de la señal.
+
+9 — Filtros de riesgo
+- No se aplican: sin máximo de drawdown diario, sin máximo de pérdidas diarias, sin límite de operaciones diarias.
+
+10 — Filtros de mercado
+- Activos según punto 8 (volumen 24h y volumen de la última vela por timeframe).
+- Sin filtro de spread.
+- Opera 24/7 (sin restricción horaria).
+- Sin filtro de noticias.
+
+11 — Logging y monitorización
+- Logging:
+  - Nivel: verboso (INFO, DEBUG, ERROR, CRITICAL, API).
+  - Local, rotación diaria: /logs/AAAA-MM/aaaa_mm_dd.csv
+  - CSV separado por comas; todos los valores entrecomillados; escapar comillas internas.
+  - Campos mínimos: timestamp dd/mm/aaaa hh:mm:ss (sin ms), par (sin sufijo USDT), origen “file.function”, texto con variables relevantes.
+- Notificaciones:
+  - Canal: Telegram.
+  - Eventos: SOLO cierres (TP, SL, cierre manual, timeout 24h, cierre por parcial en stop-limit).
+  - Contenido: par y P/L (recomendado incluir % y USDT).
+
+12 — Seguridad operativa
+- Anti-duplicado: activo (verificación en tiempo real para evitar race conditions).
+- Pérdida de conexión con el exchange: pausar nuevas acciones y esperar reconexión; registrar en log (INFO/API) la pérdida y la recuperación; sin notificaciones.
+- Watchdog: si no hay heartbeat en 60s, reiniciar proceso; hasta 10 intentos; backoff 30s.
+- Kill switch: no disponible.
+
+13 — Licencias
+- Tipo: comercial para terceros.
+- Validación online vía API con string de 128 caracteres:
+  - Los dos últimos caracteres deben ser “==”.
+  - Posición 27 (1-based) contiene dígito 1–9.
+  - Se verifica el carácter en la posición 27 + dígito: “O” = válida, “n” = no válida.
+- Duración: mensual, anual, perpetua.
+- Al expirar: el bot se detiene; no toca posiciones abiertas.
+- Chequeo de expiraciones: proceso automático diario a las 00:01; si la API no responde, el bot continúa operativo hasta el siguiente intento; el arranque permite usar el último estado válido; eventos registrados en log.
+- Control de cuentas/usuarios: una instancia por tupla (API key de Binance + host fingerprint/UUID).
+
+14 — Panel web de gestión
+- Login:
+  - Usuario: @Telegram.
+  - Contraseña: API key de Binance (riesgo alto asumido por el solicitante).
+  - Sin recuperación de contraseña, sin 2FA.
+- Home:
+  - Gráfico de profit acumulado desde inicio.
+  - Tabla dinámica de las últimas 20 operaciones cerradas:
+    - par (sin USDT), fecha entrada, fecha salida, tiempo transcurrido, inversión, razón de cierre (tp/sl/timeout/manual), PnL, etiqueta “Profit/Loss” con fondo verde/rojo.
+  - Bloque con settings editables según rol.
+- Secciones:
+  - Home: todos.
+  - Historial: todos (ven el propio). Admin/Trader pueden seleccionar otros usuarios (desplegable).
+  - Configuración: todos (solo su propia configuración).
+  - Licencias: solo Admin y Trader (lista @usuario, fecha alta, fecha expiración).
+  - Usuarios (CRUD): Admin y Trader con permisos completos; Usuario normal sin acceso.
+  - Logs/Stats: no existen.
+- Formulario exclusivo Trader:
+  - Campos: par (sin “USDT”), precio de entrada.
+  - Genera orden Limit exactamente al precio indicado, con las mismas reglas de OCO/TP/SL/timeout definidas.
+
+15 — Roles de usuario
+- Usuario normal:
+  - Puede editar: inversión por posición, lista de pares a ignorar, TP/SL, N.
+- Trader:
+  - Todo lo anterior + editar filtros globales de mercado (volumen 24h, volumen de última vela).
+  - Accede al formulario Trader (órdenes manuales).
+- Admin:
+  - Puede editar todos los settings (personales y globales) y gestiona usuarios y licencias.
+- No editables por ningún rol: offset de entrada (-0.5%) y timeout (24h).
+
+16 — Actualizaciones del robot
+- Auto-actualización: sí.
+- Gestión: comprobación diaria a las 00:05 Europe/Madrid; si hay versión nueva, descargar, actualizar y reiniciar de inmediato (incluso con posiciones/órdenes activas).
+- Notificaciones: solo cuando se haya actualizado correctamente (Telegram).
+- Recomendado (mejora): verificación de integridad (SHA256/firma) y rollback si falla.

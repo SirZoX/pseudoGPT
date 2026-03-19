@@ -58,6 +58,24 @@
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+    /* Email button */
+    #btn-send-email { display: none; width: calc(100% - 0px); padding: 11px 18px; background: #1a7a4a; color: #fff; border: none; border-radius: 0; cursor: pointer; font-size: 14px; font-weight: 600; transition: background .2s; flex-shrink: 0; }
+    #btn-send-email:hover { background: #145e38; }
+
+    /* Modal overlay */
+    #email-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100; align-items: center; justify-content: center; }
+    #email-modal.open { display: flex; }
+    .modal-box { background: #fff; border-radius: 10px; padding: 28px 28px 22px; width: 380px; max-width: 94vw; box-shadow: 0 8px 32px rgba(0,0,0,.22); }
+    .modal-box h2 { font-size: 16px; margin-bottom: 14px; color: #1a1a2e; }
+    .modal-box input[type=email] { width: 100%; padding: 9px 12px; border: 1px solid #cdd2da; border-radius: 7px; font-size: 14px; margin-bottom: 16px; outline: none; }
+    .modal-box input[type=email]:focus { border-color: #1a1a2e; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .modal-actions button { padding: 8px 18px; border: none; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    #btn-modal-cancel { background: #eee; color: #444; }
+    #btn-modal-send { background: #1a7a4a; color: #fff; }
+    #btn-modal-send:disabled { background: #aaa; cursor: not-allowed; }
+    #modal-status { font-size: 12px; color: #b00020; min-height: 16px; margin-bottom: 8px; }
   </style>
 </head>
 <body>
@@ -132,6 +150,7 @@
 
   <div class="chat-col">
     <div class="chat-history" id="chat-history"></div>
+    <button id="btn-send-email">&#9993; Enviar especificación por email</button>
     <div class="input-area">
       <textarea id="user-input" rows="3" placeholder="Escribe tu respuesta&#8230; (Enter para enviar, Shift+Enter para nueva l&#237;nea)" disabled></textarea>
       <button id="send-btn" disabled>Enviar</button>
@@ -140,10 +159,295 @@
 
 </div>
 
+<!-- Modal: enviar especificación por email -->
+<div id="email-modal">
+  <div class="modal-box">
+    <h2>&#9993; Enviar especificación por email</h2>
+    <input type="email" id="modal-email-input" placeholder="tu@email.com" autocomplete="email" />
+    <div id="modal-status"></div>
+    <div class="modal-actions">
+      <button id="btn-modal-cancel">Cancelar</button>
+      <button id="btn-modal-send">Enviar</button>
+    </div>
+  </div>
+</div>
+
 <script>
-  let conversationHistory = [];
+  // ─── State ────────────────────────────────────────────────────────────────
+  // confirmedPoints: stores one compact [CONF:...] line per closed point
+  // conversationHistory: ONLY messages for the CURRENT open point
+  // This prevents quadratic token growth (no longer re-sending all past turns)
+  let confirmedPoints = {};      // { pointNumber: 'compact summary string' }
+  let conversationHistory = [];  // current point's exchanges only
   let pointsDone = 0;
+  let specReportText = '';       // full INFORME FINAL text, captured for email
   const TOTAL_POINTS = 16;
+
+  const historyEl       = document.getElementById('chat-history');
+  const textarea        = document.getElementById('user-input');
+  const sendBtn         = document.getElementById('send-btn');
+  const restartBtn      = document.getElementById('btn-restart');
+  const progressFill    = document.getElementById('progress-fill');
+  const progressCount   = document.getElementById('progress-count');
+  const pointsListEl    = document.getElementById('points-list');
+  const btnSendEmail    = document.getElementById('btn-send-email');
+  const emailModal      = document.getElementById('email-modal');
+  const modalEmailInput = document.getElementById('modal-email-input');
+  const modalStatus     = document.getElementById('modal-status');
+  const btnModalCancel  = document.getElementById('btn-modal-cancel');
+  const btnModalSend    = document.getElementById('btn-modal-send');
+
+  document.addEventListener('DOMContentLoaded', startSession);
+
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  restartBtn.addEventListener('click', () => {
+    if (confirm('Reiniciar la sesion? Se perdera el progreso actual.')) {
+      historyEl.innerHTML = '';
+      confirmedPoints = {};
+      conversationHistory = [];
+      specReportText = '';
+      pointsDone = 0;
+      btnSendEmail.style.display = 'none';
+      updateProgress(0);
+      startSession();
+    }
+  });
+
+  textarea.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+
+  textarea.addEventListener('input', () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 140) + 'px';
+  });
+
+  sendBtn.addEventListener('click', sendMessage);
+
+  // ─── Email modal ──────────────────────────────────────────────────────────
+  btnSendEmail.addEventListener('click', () => {
+    modalStatus.textContent = '';
+    modalEmailInput.value = '';
+    emailModal.classList.add('open');
+    modalEmailInput.focus();
+  });
+
+  btnModalCancel.addEventListener('click', () => emailModal.classList.remove('open'));
+
+  emailModal.addEventListener('click', e => {
+    if (e.target === emailModal) emailModal.classList.remove('open');
+  });
+
+  btnModalSend.addEventListener('click', async () => {
+    const to = modalEmailInput.value.trim();
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      modalStatus.textContent = 'Introduce un email válido.';
+      return;
+    }
+    btnModalSend.disabled = true;
+    modalStatus.textContent = 'Enviando…';
+    try {
+      const res = await fetch('/api/send-spec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, specText: specReportText })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error);
+      modalStatus.style.color = '#1a7a4a';
+      modalStatus.textContent = '✓ Email enviado correctamente.';
+      setTimeout(() => emailModal.classList.remove('open'), 1800);
+    } catch (err) {
+      modalStatus.style.color = '#b00020';
+      modalStatus.textContent = 'Error: ' + err.message;
+    }
+    btnModalSend.disabled = false;
+  });
+
+  // ─── Session ──────────────────────────────────────────────────────────────
+  async function startSession() {
+    setInputEnabled(false);
+    addTypingIndicator();
+    conversationHistory = [{ role: 'user', content: 'inicio' }];
+    try {
+      const reply = await callAPI(conversationHistory);
+      conversationHistory.push({ role: 'assistant', content: reply });
+      removeTypingIndicator();
+      addMessage('gpt', reply);
+      detectProgress(reply);
+      prefillTemplate(reply);
+    } catch (err) {
+      removeTypingIndicator();
+      addMessage('error', 'No se pudo conectar con el servidor.');
+    }
+    setInputEnabled(true);
+  }
+
+  async function sendMessage() {
+    const text = textarea.value.trim();
+    if (!text) return;
+    textarea.value = '';
+    textarea.style.height = 'auto';
+    setInputEnabled(false);
+    conversationHistory.push({ role: 'user', content: text });
+    addMessage('user', text);
+    addTypingIndicator();
+    try {
+      const reply = await callAPI(conversationHistory);
+      conversationHistory.push({ role: 'assistant', content: reply });
+      removeTypingIndicator();
+      addMessage('gpt', reply);
+      detectProgress(reply);
+      prefillTemplate(reply);
+    } catch (err) {
+      removeTypingIndicator();
+      addMessage('error', 'Error: ' + err.message);
+    }
+    setInputEnabled(true);
+  }
+
+  // ─── Template pre-fill ────────────────────────────────────────────────────
+  // When GPT emits [TEMPLATE]...[/TEMPLATE], pre-fill the textarea so the
+  // user just fills in blanks and sends one message instead of many turns.
+  function prefillTemplate(replyText) {
+    const match = replyText.match(/\[TEMPLATE\]([\s\S]*?)\[\/TEMPLATE\]/);
+    if (match) {
+      const tmpl = match[1].trim();
+      textarea.value = tmpl;
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, 140) + 'px';
+      textarea.focus();
+      // Move cursor to end
+      textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+    }
+  }
+
+  // ─── API ─────────────────────────────────────────────────────────────────
+  function buildSpecContext() {
+    const entries = Object.keys(confirmedPoints)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map(n => `[${n}] ${confirmedPoints[n]}`);
+    return entries.join('\n');
+  }
+
+  async function callAPI(messages) {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages,
+        specContext: buildSpecContext()
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor');
+    return data.reply;
+  }
+
+  // ─── Progress ────────────────────────────────────────────────────────────
+  function detectProgress(replyText) {
+    // Detect [PUNTO_OK:N] emitted explicitly by the AI
+    const match = replyText.match(/\[PUNTO_OK:(\d+)\]/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n >= 1 && n <= TOTAL_POINTS) {
+        // Extract compact summary from [CONF:...] marker
+        const confMatch = replyText.match(/\[CONF:([^\]]{1,220})\]/);
+        if (confMatch) {
+          confirmedPoints[n] = confMatch[1].trim();
+        } else {
+          const cleaned = replyText
+            .replace(/\s*\[PUNTO_OK:\d+\]\s*/g, '')
+            .replace(/\s*\[CONF:[^\]]*\]\s*/g, '')
+            .replace(/\s*\[TEMPLATE\][\s\S]*?\[\/TEMPLATE\]\s*/g, '')
+            .trim();
+          confirmedPoints[n] = cleaned.substring(0, 200);
+        }
+        // Reset: keep only the last assistant message (contains the next question)
+        conversationHistory = conversationHistory.slice(-1);
+        updateProgress(n);
+      }
+    }
+    // Final report: all points covered — capture text and show email button
+    if (replyText.includes('ESPECIFICACION TECNICA COMPLETA') || replyText.includes('ESPECIFICACIÓN TÉCNICA COMPLETA')) {
+      specReportText = replyText
+        .replace(/\s*\[PUNTO_OK:\d+\]\s*/g, '')
+        .replace(/\s*\[CONF:[^\]]*\]\s*/g, '')
+        .replace(/\s*\[TEMPLATE\][\s\S]*?\[\/TEMPLATE\]\s*/g, '')
+        .trim();
+      btnSendEmail.style.display = 'block';
+      updateProgress(TOTAL_POINTS);
+    }
+  }
+
+  function updateProgress(n) {
+    pointsDone = n;
+    progressFill.style.width = Math.round(n / TOTAL_POINTS * 100) + '%';
+    progressCount.textContent = n + ' / ' + TOTAL_POINTS;
+    pointsListEl.querySelectorAll('li').forEach((li, i) => li.classList.toggle('done', i < n));
+  }
+
+  // ─── UI helpers ──────────────────────────────────────────────────────────
+  function addMessage(role, text) {
+    const wrap = document.createElement('div');
+    wrap.className = 'message ' + role;
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = role === 'user' ? 'Tu' : role === 'gpt' ? 'GPT' : 'Error';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    // Strip all control markers before display
+    bubble.textContent = text
+      .replace(/\s*\[PUNTO_OK:\d+\]\s*$/m, '')
+      .replace(/\s*\[CONF:[^\]]*\]\s*$/m, '')
+      .replace(/\s*\[TEMPLATE\][\s\S]*?\[\/TEMPLATE\]/g, '')
+      .trimEnd();
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    historyEl.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  function addTypingIndicator() {
+    const wrap = document.createElement('div');
+    wrap.className = 'message gpt';
+    wrap.id = 'typing';
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = 'GPT';
+    const ind = document.createElement('div');
+    ind.className = 'typing-indicator';
+    ind.innerHTML = '<span></span><span></span><span></span>';
+    wrap.appendChild(label);
+    wrap.appendChild(ind);
+    historyEl.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  function removeTypingIndicator() {
+    const el = document.getElementById('typing');
+    if (el) el.remove();
+  }
+
+  function setInputEnabled(enabled) {
+    textarea.disabled = !enabled;
+    sendBtn.disabled  = !enabled;
+    if (enabled) textarea.focus();
+  }
+
+  function scrollToBottom() {
+    historyEl.scrollTop = historyEl.scrollHeight;
+  }
+</script>
 
   const historyEl     = document.getElementById('chat-history');
   const textarea      = document.getElementById('user-input');
@@ -167,6 +471,7 @@
   restartBtn.addEventListener('click', () => {
     if (confirm('Reiniciar la sesion? Se perdera el progreso actual.')) {
       historyEl.innerHTML = '';
+      confirmedPoints = {};
       conversationHistory = [];
       pointsDone = 0;
       updateProgress(0);
@@ -224,11 +529,23 @@
     setInputEnabled(true);
   }
 
+  // Build the compact spec context sent to the API (replaces the full conversation history)
+  function buildSpecContext() {
+    const entries = Object.keys(confirmedPoints)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map(n => `[${n}] ${confirmedPoints[n]}`);
+    return entries.join('\n');
+  }
+
   async function callAPI(messages) {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages })
+      body: JSON.stringify({
+        messages,
+        specContext: buildSpecContext()
+      })
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor');
@@ -236,13 +553,30 @@
   }
 
   function detectProgress(replyText) {
-    // Detectar [PUNTO_OK:N] emitido explicitamente por la IA
+    // Detect [PUNTO_OK:N] emitted explicitly by the AI
     const match = replyText.match(/\[PUNTO_OK:(\d+)\]/);
     if (match) {
       const n = parseInt(match[1], 10);
-      if (n >= 1 && n <= TOTAL_POINTS) updateProgress(n);
+      if (n >= 1 && n <= TOTAL_POINTS) {
+        // Extract compact summary from [CONF:...] marker (preferred)
+        const confMatch = replyText.match(/\[CONF:([^\]]{1,220})\]/);
+        if (confMatch) {
+          confirmedPoints[n] = confMatch[1].trim();
+        } else {
+          // Fallback: use first 200 chars of cleaned reply as summary
+          const cleaned = replyText
+            .replace(/\s*\[PUNTO_OK:\d+\]\s*/g, '')
+            .replace(/\s*\[CONF:[^\]]*\]\s*/g, '')
+            .trim();
+          confirmedPoints[n] = cleaned.substring(0, 200);
+        }
+        // Reset: keep only the last assistant message (it contains the next question)
+        // so the GPT knows what it just asked when the user answers next
+        conversationHistory = conversationHistory.slice(-1);
+        updateProgress(n);
+      }
     }
-    // Informe final: todos los puntos cubiertos
+    // Final report: all points covered
     if (replyText.includes('CHECKLIST DE ESPECIFICACION') || replyText.includes('ESPECIFICACION TECNICA COMPLETA')) {
       updateProgress(TOTAL_POINTS);
     }
@@ -263,8 +597,11 @@
     label.textContent = role === 'user' ? 'Tu' : role === 'gpt' ? 'GPT' : 'Error';
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    // Eliminar la marca de control antes de mostrar el texto al usuario
-    bubble.textContent = text.replace(/\s*\[PUNTO_OK:\d+\]\s*$/m, '').trimEnd();
+    // Strip control markers before display
+    bubble.textContent = text
+      .replace(/\s*\[PUNTO_OK:\d+\]\s*$/m, '')
+      .replace(/\s*\[CONF:[^\]]*\]\s*$/m, '')
+      .trimEnd();
     wrap.appendChild(label);
     wrap.appendChild(bubble);
     historyEl.appendChild(wrap);
