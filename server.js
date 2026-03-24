@@ -56,7 +56,7 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const stream = await openai.responses.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       input,
       stream: true,
     });

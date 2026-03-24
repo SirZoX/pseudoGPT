@@ -60,7 +60,7 @@
     ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
 
     /* Email button */
-    #btn-send-email { display: none; width: calc(100% - 0px); padding: 11px 18px; background: #1a7a4a; color: #fff; border: none; border-radius: 0; cursor: pointer; font-size: 14px; font-weight: 600; transition: background .2s; flex-shrink: 0; }
+    #btn-send-email { display: block; width: calc(100% - 0px); padding: 11px 18px; background: #1a7a4a; color: #fff; border: none; border-radius: 0; cursor: pointer; font-size: 14px; font-weight: 600; transition: background .2s; flex-shrink: 0; }
     #btn-send-email:hover { background: #145e38; }
 
     /* Modal overlay */
@@ -181,6 +181,7 @@
   let conversationHistory = [];  // current point's exchanges only
   let pointsDone = 0;
   let specReportText = '';       // full INFORME FINAL text, captured for email
+  let templateFilledThisRound = false;
   const TOTAL_POINTS = 16;
 
   const historyEl       = document.getElementById('chat-history');
@@ -215,7 +216,7 @@
       conversationHistory = [];
       specReportText = '';
       pointsDone = 0;
-      btnSendEmail.style.display = 'none';
+      templateFilledThisRound = false;
       updateProgress(0);
       startSession();
     }
@@ -258,7 +259,7 @@
       const res = await fetch('/api/send-spec', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, specText: specReportText })
+        body: JSON.stringify({ to, specText: specReportText || '[Prueba de conexión SMTP]' })
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error);
@@ -276,12 +277,14 @@
   async function startSession() {
     setInputEnabled(false);
     addTypingIndicator();
+    templateFilledThisRound = false;
     conversationHistory = [{ role: 'user', content: 'inicio' }];
     let bubbleEl = null;
     try {
       const reply = await callAPI(conversationHistory, (partial) => {
         if (!bubbleEl) bubbleEl = addStreamingBubble();
         updateStreamingBubble(bubbleEl, partial);
+        detectProgressStream(partial);
       });
       if (bubbleEl) { finalizeStreamingBubble(bubbleEl, reply); }
       else { removeTypingIndicator(); addMessage('gpt', reply); }
@@ -302,6 +305,7 @@
     textarea.value = '';
     textarea.style.height = 'auto';
     setInputEnabled(false);
+    templateFilledThisRound = false;
     conversationHistory.push({ role: 'user', content: text });
     addMessage('user', text);
     addTypingIndicator();
@@ -310,6 +314,7 @@
       const reply = await callAPI(conversationHistory, (partial) => {
         if (!bubbleEl) bubbleEl = addStreamingBubble();
         updateStreamingBubble(bubbleEl, partial);
+        detectProgressStream(partial);
       });
       if (bubbleEl) { finalizeStreamingBubble(bubbleEl, reply); }
       else { removeTypingIndicator(); addMessage('gpt', reply); }
@@ -393,13 +398,18 @@
   }
 
   // ─── Progress ────────────────────────────────────────────────────────────
+  function detectProgressStream(partialText) {
+    for (const m of partialText.matchAll(/\[PUNTO_OK:(\d+)\]/g)) {
+      const n = parseInt(m[1], 10);
+      if (n >= 1 && n <= TOTAL_POINTS && n > pointsDone) updateProgress(n);
+    }
+  }
+
   function detectProgress(replyText) {
-    // Detect [PUNTO_OK:N] emitted explicitly by the AI
-    const match = replyText.match(/\[PUNTO_OK:(\d+)\]/);
-    if (match) {
+    // Detecta todos los [PUNTO_OK:N] de la respuesta (gpt-4o puede emitir varios)
+    for (const match of replyText.matchAll(/\[PUNTO_OK:(\d+)\]/g)) {
       const n = parseInt(match[1], 10);
       if (n >= 1 && n <= TOTAL_POINTS) {
-        // Extract compact summary from [CONF:...] marker
         const confMatch = replyText.match(/\[CONF:([^\]]{1,220})\]/);
         if (confMatch) {
           confirmedPoints[n] = confMatch[1].trim();
@@ -411,19 +421,17 @@
             .trim();
           confirmedPoints[n] = cleaned.substring(0, 200);
         }
-        // Reset: keep only the last assistant message (contains the next question)
         conversationHistory = conversationHistory.slice(-1);
-        updateProgress(n);
+        if (n > pointsDone) updateProgress(n);
       }
     }
-    // Final report: all points covered — capture text and show email button
+    // Informe final: capturar texto para email
     if (replyText.includes('ESPECIFICACION TECNICA COMPLETA') || replyText.includes('ESPECIFICACIÓN TÉCNICA COMPLETA')) {
       specReportText = replyText
         .replace(/\s*\[PUNTO_OK:\d+\]\s*/g, '')
         .replace(/\s*\[CONF:[^\]]*\]\s*/g, '')
         .replace(/\s*\[TEMPLATE\][\s\S]*?\[\/TEMPLATE\]\s*/g, '')
         .trim();
-      btnSendEmail.style.display = 'block';
       updateProgress(TOTAL_POINTS);
     }
   }
@@ -474,12 +482,26 @@
   }
 
   function updateStreamingBubble(bubbleEl, fullText) {
-    bubbleEl.textContent = fullText
+    const display = fullText
       .replace(/\s*\[PUNTO_OK:\d+\]\s*$/m, '')
       .replace(/\s*\[CONF:[^\]]*\]\s*$/m, '')
-      .replace(/\s*\[TEMPLATE\][\s\S]*?\[\/TEMPLATE\]/g, '')
+      .replace(/\s*\[TEMPLATE\][\s\S]*?\[\/TEMPLATE\]/g, '')  // bloque completo
+      .replace(/\s*\[TEMPLATE\][\s\S]*$/, '')                  // bloque parcial mid-stream
       .trimEnd();
+    bubbleEl.textContent = display;
     scrollToBottom();
+    // Prefill textarea en cuanto llega el bloque completo [TEMPLATE]...[/TEMPLATE]
+    if (!templateFilledThisRound) {
+      const tmplMatch = fullText.match(/\[TEMPLATE\]([\s\S]*?)\[\/TEMPLATE\]/);
+      if (tmplMatch) {
+        templateFilledThisRound = true;
+        const tmpl = tmplMatch[1].trim();
+        textarea.value = tmpl;
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 140) + 'px';
+        textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+      }
+    }
   }
 
   function finalizeStreamingBubble(bubbleEl, fullText) {
