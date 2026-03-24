@@ -50,16 +50,28 @@ app.post('/api/chat', async (req, res) => {
 
   input.push(...messages);
 
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
   try {
-    const response = await openai.responses.create({
-      model: 'gpt-5',
-      input
+    const stream = await openai.responses.create({
+      model: 'gpt-4o-mini',
+      input,
+      stream: true,
     });
 
-    res.json({ reply: response.output_text });
+    for await (const event of stream) {
+      if (event.type === 'response.output_text.delta') {
+        res.write(`data: ${JSON.stringify({ delta: event.delta })}\n\n`);
+      }
+    }
+    res.write('data: [DONE]\n\n');
+    res.end();
   } catch (err) {
     console.error('Error al llamar a OpenAI:', err.message);
-    res.status(500).json({ error: err.message || 'Error interno al llamar a la API.' });
+    res.write(`data: ${JSON.stringify({ error: err.message || 'Error interno al llamar a la API.' })}\n\n`);
+    res.end();
   }
 });
 

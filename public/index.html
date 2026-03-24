@@ -277,15 +277,20 @@
     setInputEnabled(false);
     addTypingIndicator();
     conversationHistory = [{ role: 'user', content: 'inicio' }];
+    let bubbleEl = null;
     try {
-      const reply = await callAPI(conversationHistory);
+      const reply = await callAPI(conversationHistory, (partial) => {
+        if (!bubbleEl) bubbleEl = addStreamingBubble();
+        updateStreamingBubble(bubbleEl, partial);
+      });
+      if (bubbleEl) { finalizeStreamingBubble(bubbleEl, reply); }
+      else { removeTypingIndicator(); addMessage('gpt', reply); }
       conversationHistory.push({ role: 'assistant', content: reply });
-      removeTypingIndicator();
-      addMessage('gpt', reply);
       detectProgress(reply);
       prefillTemplate(reply);
     } catch (err) {
       removeTypingIndicator();
+      if (bubbleEl) { const w = document.getElementById('streaming-bubble'); if (w) w.remove(); }
       addMessage('error', 'No se pudo conectar con el servidor.');
     }
     setInputEnabled(true);
@@ -300,15 +305,20 @@
     conversationHistory.push({ role: 'user', content: text });
     addMessage('user', text);
     addTypingIndicator();
+    let bubbleEl = null;
     try {
-      const reply = await callAPI(conversationHistory);
+      const reply = await callAPI(conversationHistory, (partial) => {
+        if (!bubbleEl) bubbleEl = addStreamingBubble();
+        updateStreamingBubble(bubbleEl, partial);
+      });
+      if (bubbleEl) { finalizeStreamingBubble(bubbleEl, reply); }
+      else { removeTypingIndicator(); addMessage('gpt', reply); }
       conversationHistory.push({ role: 'assistant', content: reply });
-      removeTypingIndicator();
-      addMessage('gpt', reply);
       detectProgress(reply);
       prefillTemplate(reply);
     } catch (err) {
       removeTypingIndicator();
+      if (bubbleEl) { const w = document.getElementById('streaming-bubble'); if (w) w.remove(); }
       addMessage('error', 'Error: ' + err.message);
     }
     setInputEnabled(true);
@@ -339,7 +349,7 @@
     return entries.join('\n');
   }
 
-  async function callAPI(messages) {
+  async function callAPI(messages, onChunk) {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -348,9 +358,38 @@
         specContext: buildSpecContext()
       })
     });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor');
-    return data.reply;
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Error del servidor');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const chunk = line.slice(6).trim();
+        if (chunk === '[DONE]') return fullText;
+        try {
+          const parsed = JSON.parse(chunk);
+          if (parsed.error) throw new Error(parsed.error);
+          if (parsed.delta) {
+            fullText += parsed.delta;
+            if (onChunk) onChunk(fullText);
+          }
+        } catch (e) { if (e.message !== 'Unexpected token') throw e; }
+      }
+    }
+    return fullText;
   }
 
   // ─── Progress ────────────────────────────────────────────────────────────
@@ -415,6 +454,38 @@
     wrap.appendChild(bubble);
     historyEl.appendChild(wrap);
     scrollToBottom();
+  }
+
+  function addStreamingBubble() {
+    removeTypingIndicator();
+    const wrap = document.createElement('div');
+    wrap.className = 'message gpt';
+    wrap.id = 'streaming-bubble';
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = 'GPT';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    historyEl.appendChild(wrap);
+    scrollToBottom();
+    return bubble;
+  }
+
+  function updateStreamingBubble(bubbleEl, fullText) {
+    bubbleEl.textContent = fullText
+      .replace(/\s*\[PUNTO_OK:\d+\]\s*$/m, '')
+      .replace(/\s*\[CONF:[^\]]*\]\s*$/m, '')
+      .replace(/\s*\[TEMPLATE\][\s\S]*?\[\/TEMPLATE\]/g, '')
+      .trimEnd();
+    scrollToBottom();
+  }
+
+  function finalizeStreamingBubble(bubbleEl, fullText) {
+    updateStreamingBubble(bubbleEl, fullText);
+    const wrap = document.getElementById('streaming-bubble');
+    if (wrap) wrap.removeAttribute('id');
   }
 
   function addTypingIndicator() {
